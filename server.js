@@ -30,6 +30,8 @@ const serverCondition = {
 	status: 'ok',
 };
 
+app.use(express.json());
+
 app.get('/', (req, res) => {
 	res.json(apiTask);
 });
@@ -49,6 +51,24 @@ app.get('/tasks/:id', (req, res) => {
 		return res.status(404).json({ error: `Task not found` });
 	}
 	res.status(200).json(task);
+});
+
+app.post('/tasks', (req, res) => {
+	const maxId = tasks.reduce((max, task) => Math.max(max, task.id), 0);
+	const id = maxId + 1;
+	const { title } = req.body;
+	if (title === undefined || typeof title !== 'string' || title.trim() === '') {
+		return res
+			.status(400)
+			.json({ error: `Title is required and must be a non-empty string` });
+	}
+	const newTask = {
+		id,
+		title,
+		done: false,
+	};
+	tasks.push(newTask);
+	res.status(201).json(newTask);
 });
 
 app.listen(port, () => {
