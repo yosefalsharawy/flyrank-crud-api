@@ -2,6 +2,7 @@ const express = require('express');
 const swaggerUi = require('swagger-ui-express');
 const swaggerDocument = require('../openapi.json');
 const app = express();
+require('./db/database');
 
 const apiTask = {
 	name: 'Task API',
