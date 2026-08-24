@@ -4,8 +4,8 @@ const {
 	getAllTasks,
 	getTaskById,
 	addTask,
-	updateTask,
 	deleteTask,
+	updateTask,
 } = require('../controllers/task.controller');
 
 router.get('/', getAllTasks);

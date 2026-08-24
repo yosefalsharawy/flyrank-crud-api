@@ -2,6 +2,8 @@ const {
 	getAllTasks,
 	getTaskById,
 	createTask,
+	updateTask,
+	deleteTask,
 } = require('../db/task.repository');
 
 exports.getAllTasks = (req, res) => {
@@ -45,22 +47,25 @@ exports.updateTask = (req, res) => {
 	if (hasDone && typeof done !== 'boolean') {
 		return res.status(400).json({ error: `done is invalid` });
 	}
-	const task = tasks.find((elem) => elem.id.toString() === id);
-	if (!task) {
-		return res.status(404).json({ error: `task is not found` });
-	}
-	if (hasTitle) task.title = title.trim();
-	if (hasDone) task.done = done;
+	const task = getTaskById(id);
 
-	res.status(200).json(task);
+	if (!task) {
+		return res.status(404).json({ error: 'task is not found' });
+	}
+
+	const newTitle = hasTitle ? title.trim() : task.title;
+	const newDone = hasDone ? done : task.done;
+
+	const updatedTask = updateTask(id, newTitle, newDone);
+
+	res.status(200).json(updatedTask);
 };
 
 exports.deleteTask = (req, res) => {
 	const { id } = req.params;
-	const taskIndex = tasks.findIndex((elem) => elem.id.toString() === id);
-	if (taskIndex === -1) {
+	const task = deleteTask(id);
+	if (!task) {
 		return res.status(404).json({ error: `task is not found` });
 	}
-	tasks.splice(taskIndex, 1);
 	res.sendStatus(204);
 };

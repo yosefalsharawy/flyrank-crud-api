@@ -1,4 +1,3 @@
-const { updateTask } = require('../controllers/task.controller');
 const db = require('./database');
 
 const getAllTasks = () => {
@@ -37,8 +36,34 @@ const createTask = (title, done) => {
 	};
 };
 
+const updateTask = (id, title, done) => {
+	const statement = db.prepare(
+		'UPDATE tasks SET title = ?, done = ? WHERE id = ?',
+	);
+	const result = statement.run(title, done ? 1 : 0, id);
+	if (result.changes === 0) {
+		return undefined;
+	}
+
+	return {
+		id: Number(id),
+		title,
+		done: Boolean(done),
+	};
+};
+
+const deleteTask = (id) => {
+	const statement = db.prepare('DELETE FROM tasks WHERE id = ?');
+
+	const result = statement.run(id);
+
+	return result.changes > 0;
+};
+
 module.exports = {
 	getAllTasks,
 	getTaskById,
 	createTask,
+	updateTask,
+	deleteTask,
 };
