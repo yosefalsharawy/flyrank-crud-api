@@ -308,9 +308,9 @@ SELECT * FROM tasks WHERE done = 1;
 
 This returns all tasks that are currently marked as completed.
 
-Changes made directly in DB Browser are immediately reflected by the API without restarting the server because both the API and DB Browser access the same SQLite database file.
-
 ![SQLite database in DB Browser](database.png)
+
+Changes made directly in DB Browser are immediately reflected by the API without restarting the server because both the API and DB Browser access the same SQLite database file.
 
 ---
 
