@@ -1,19 +1,31 @@
-const tasks = [
-	{
-		id: 1,
-		title: 'task 1 implementation',
-		done: true,
-	},
-	{
-		id: 2,
-		title: 'task 2 implementation',
-		done: false,
-	},
-	{
-		id: 3,
-		title: 'task 3 implementation',
-		done: true,
-	},
-];
+const db = require('./database');
 
-module.exports = tasks;
+const getAllTasks = () => {
+	const statement = db.prepare('SELECT * FROM tasks');
+	const tasks = statement.all();
+
+	return tasks.map((task) => ({
+		...task,
+		done: Boolean(task.done),
+	}));
+};
+
+const getTaskById = (id) => {
+	const statement = db.prepare('SELECT * FROM tasks WHERE id = ?');
+
+	const task = statement.get(id);
+
+	if (!task) {
+		return undefined;
+	}
+
+	return {
+		...task,
+		done: Boolean(task.done),
+	};
+};
+
+module.exports = {
+	getAllTasks,
+	getTaskById,
+};
