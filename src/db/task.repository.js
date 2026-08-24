@@ -1,3 +1,4 @@
+const { updateTask } = require('../controllers/task.controller');
 const db = require('./database');
 
 const getAllTasks = () => {
@@ -25,7 +26,19 @@ const getTaskById = (id) => {
 	};
 };
 
+const createTask = (title, done) => {
+	const statement = db.prepare('INSERT INTO tasks (title,done) VALUES (?,?)');
+
+	const result = statement.run(title, 0);
+	return {
+		id: Number(result.lastInsertRowid),
+		title,
+		done: false,
+	};
+};
+
 module.exports = {
 	getAllTasks,
 	getTaskById,
+	createTask,
 };

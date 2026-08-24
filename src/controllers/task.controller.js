@@ -1,4 +1,8 @@
-const { getAllTasks, getTaskById } = require('../db/task.repository');
+const {
+	getAllTasks,
+	getTaskById,
+	createTask,
+} = require('../db/task.repository');
 
 exports.getAllTasks = (req, res) => {
 	const tasks = getAllTasks();
@@ -15,21 +19,14 @@ exports.getTaskById = (req, res) => {
 };
 
 exports.addTask = (req, res) => {
-	const maxId = tasks.reduce((max, task) => Math.max(max, task.id), 0);
-	const id = maxId + 1;
 	const { title } = req.body;
 	if (title === undefined || typeof title !== 'string' || title.trim() === '') {
 		return res
 			.status(400)
 			.json({ error: `Title is required and must be a non-empty string` });
 	}
-	const newTask = {
-		id,
-		title,
-		done: false,
-	};
-	tasks.push(newTask);
-	res.status(201).json(newTask);
+	const task = createTask(title.trim());
+	res.status(201).json(task);
 };
 
 exports.updateTask = (req, res) => {
