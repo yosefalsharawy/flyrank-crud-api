@@ -1,38 +1,47 @@
-const path = require('path');
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
+require('dotenv').config();
 
-const dbPath = path.join(__dirname, 'tasks.db');
-const db = new Database(dbPath);
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
-console.log('Connected to SQLite database:', dbPath);
+const initializeDatabase = async () => {
+  // 1. Check database connection
+  await pool.query('SELECT 1');
 
-db.exec(`
+  console.log('Connected to PostgreSQL database');
+
+  // 2. Create tasks table
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS tasks (
-        id INTEGER PRIMARY KEY,
-        title TEXT NOT NULL,
-        done INTEGER NOT NULL DEFAULT 0
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      done BOOLEAN NOT NULL DEFAULT FALSE
     )
-`);
+  `);
 
-const row = db.prepare('SELECT COUNT(*) AS count FROM tasks').get();
+  // 3. Check existing tasks
+  const result = await pool.query(
+    'SELECT COUNT(*) AS count FROM tasks'
+  );
 
-if (row.count === 0) {
-	const insert = db.prepare(`
-        INSERT INTO tasks (title, done)
-        VALUES (?, ?)
+  // 4. Seed only if table is empty
+  if (Number(result.rows[0].count) === 0) {
+    await pool.query(`
+      INSERT INTO tasks (title, done)
+      VALUES
+        ('task 1 implementation', TRUE),
+        ('task 2 implementation', FALSE),
+        ('task 3 implementation', TRUE)
     `);
 
-	const seedTasks = [
-		['task 1 implementation', 1],
-		['task 2 implementation', 0],
-		['task 3 implementation', 1],
-	];
+    console.log('Seeded 3 tasks.');
+  }
 
-	for (const [title, done] of seedTasks) {
-		insert.run(title, done);
-	}
+  console.log('Database initialized successfully.');
+};
 
-	console.log('Seeded 3 tasks.');
-}
-
-module.exports = db;
+module.exports = {
+  pool,
+  initializeDatabase,
+};
