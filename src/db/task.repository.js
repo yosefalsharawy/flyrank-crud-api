@@ -1,28 +1,16 @@
 const db = require('./database');
+const { pool } = require('./database');
 
-const getAllTasks = () => {
-	const statement = db.prepare('SELECT * FROM tasks');
-	const tasks = statement.all();
+const getAllTasks = async () => {
+	const result = await pool.query('SELECT * FROM tasks ORDER BY id');
 
-	return tasks.map((task) => ({
-		...task,
-		done: Boolean(task.done),
-	}));
+	return result.rows;
 };
 
-const getTaskById = (id) => {
-	const statement = db.prepare('SELECT * FROM tasks WHERE id = ?');
+const getTaskById = async (id) => {
+	const result = await pool.query('SELECT * FROM tasks WHERE id = $1', [id]);
 
-	const task = statement.get(id);
-
-	if (!task) {
-		return undefined;
-	}
-
-	return {
-		...task,
-		done: Boolean(task.done),
-	};
+	return result.rows[0];
 };
 
 const createTask = (title, done) => {

@@ -6,18 +6,30 @@ const {
 	deleteTask,
 } = require('../db/task.repository');
 
-exports.getAllTasks = (req, res) => {
-	const tasks = getAllTasks();
-	res.status(200).json(tasks);
+exports.getAllTasks = async (req, res) => {
+	try {
+		const tasks = await getAllTasks();
+		return res.status(200).json(tasks);
+	} catch (error) {
+		console.error(error);
+		return res.status(500).json({ error: 'Internal server error' });
+	}
 };
 
-exports.getTaskById = (req, res) => {
-	const { id } = req.params;
-	const task = getTaskById(id);
-	if (!task) {
-		return res.status(404).json({ error: `Task not found` });
+exports.getTaskById = async (req, res) => {
+	try {
+		const { id } = req.params;
+		const task = await getTaskById(id);
+
+		if (!task) {
+			return res.status(404).json({ error: 'Task not found' });
+		}
+
+		return res.status(200).json(task);
+	} catch (error) {
+		console.error(error);
+		return res.status(500).json({ error: 'Internal server error' });
 	}
-	res.status(200).json(task);
 };
 
 exports.addTask = (req, res) => {
