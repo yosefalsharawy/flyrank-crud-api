@@ -1,6 +1,7 @@
 const express = require('express');
 const swaggerUi = require('swagger-ui-express');
 const swaggerDocument = require('../openapi.json');
+const authRoutes = require('./routes/authRoutes');
 
 const app = express();
 
@@ -15,6 +16,8 @@ const serverCondition = {
 };
 
 app.use(express.json());
+
+app.use('/auth', authRoutes);
 
 app.get('/', (req, res) => {
 	res.json(apiTask);
