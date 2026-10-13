@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const { createClient } = require('@supabase/supabase-js');
 
 const signup = async (req, res) => {
 	try {
@@ -63,4 +64,43 @@ const login = async (req, res) => {
 	}
 };
 
-module.exports = { signup, login };
+const logout = async (req, res) => {
+	try {
+		const userClient = createClient(
+			process.env.SUPABASE_URL,
+			process.env.SUPABASE_KEY,
+			{
+				auth: {
+					persistSession: false,
+					autoRefreshToken: false,
+					detectSessionInUrl: false,
+				},
+				global: {
+					headers: {
+						Authorization: `Bearer ${req.accessToken}`,
+					},
+				},
+			},
+		);
+
+		const { error } = await userClient.auth.signOut({
+			scope: 'global',
+		});
+
+		if (error) {
+			console.error('Logout failed:', error.message);
+			return res.status(500).json({
+				error: 'Logout failed',
+			});
+		}
+
+		return res.status(204).send();
+	} catch (error) {
+		console.error('Logout failed:', error.message);
+		return res.status(500).json({
+			error: 'Internal server error',
+		});
+	}
+};
+
+module.exports = { signup, login, logout };
