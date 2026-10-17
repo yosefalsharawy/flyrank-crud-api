@@ -14,6 +14,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let lastRequestTime = 0;
 
+const stats = {
+	pages_fetched: 0,
+	cache_hits: 0,
+	failed_pages: [],
+};
+
 // =====================================
 // STAGE 1: FETCH AND CACHE HTML
 // =====================================
@@ -21,44 +27,69 @@ let lastRequestTime = 0;
 async function fetchPage(url, cacheFile) {
 	const cachePath = path.join(CACHE_DIR, cacheFile);
 
+	// Check the cache first.
 	try {
 		const html = await fs.readFile(cachePath, 'utf8');
+
+		stats.cache_hits++;
 		console.log(`CACHE HIT: ${cacheFile}`);
+
 		return html;
 	} catch (error) {
-		if (error.code !== 'ENOENT') {
+		if (error.code !== 'ENOENT') throw error;
+	}
+
+	// Maximum two attempts: initial request + one retry.
+	for (let attempt = 1; attempt <= 2; attempt++) {
+		// Respect 500ms between real requests, including retries.
+		if (lastRequestTime) {
+			const elapsed = Date.now() - lastRequestTime;
+			await sleep(Math.max(0, 500 - elapsed));
+		}
+
+		lastRequestTime = Date.now();
+
+		console.log(`FETCH: ${cacheFile} (attempt ${attempt})`);
+
+		try {
+			const response = await fetch(url, {
+				headers: {
+					'User-Agent': USER_AGENT,
+				},
+				signal: AbortSignal.timeout(30000),
+			});
+
+			stats.pages_fetched++;
+
+			if (!response.ok) {
+				const error = new Error(`HTTP ${response.status}: ${url}`);
+
+				error.status = response.status;
+				throw error;
+			}
+
+			const html = await response.text();
+
+			await fs.mkdir(CACHE_DIR, { recursive: true });
+			await fs.writeFile(cachePath, html, 'utf8');
+
+			return html;
+		} catch (error) {
+			const isTimeout =
+				error.name === 'TimeoutError' || error.name === 'AbortError';
+
+			const isServerError = error.status >= 500 && error.status <= 599;
+
+			const shouldRetry = attempt === 1 && (isTimeout || isServerError);
+
+			if (shouldRetry) {
+				console.log(`RETRY: ${url} - ${error.message}`);
+				continue;
+			}
+
 			throw error;
 		}
 	}
-
-	// Wait at least 500ms between actual HTTP requests.
-	if (lastRequestTime) {
-		const elapsed = Date.now() - lastRequestTime;
-		await sleep(Math.max(0, 500 - elapsed));
-	}
-
-	lastRequestTime = Date.now();
-
-	console.log(`FETCH: ${cacheFile}`);
-
-	const response = await fetch(url, {
-		headers: {
-			'User-Agent': USER_AGENT,
-		},
-		signal: AbortSignal.timeout(30000),
-	});
-
-	if (response.status !== 200) {
-		throw new Error(`HTTP ${response.status}: ${url}`);
-	}
-
-	const html = await response.text();
-
-	await fs.mkdir(CACHE_DIR, { recursive: true });
-
-	await fs.writeFile(cachePath, html, 'utf8');
-
-	return html;
 }
 
 // =====================================
@@ -251,6 +282,11 @@ async function saveBooks(rawBooks) {
 
 	console.log(`valid_records=${validBooks.length}`);
 	console.log(`invalid_records=${errors.length}`);
+
+	return {
+		valid_records: validBooks.length,
+		invalid_records: errors.length,
+	};
 }
 
 // =====================================
@@ -258,29 +294,70 @@ async function saveBooks(rawBooks) {
 // =====================================
 
 async function main() {
-	// Stage 2: Discover books.
+	const startTime = new Date();
+	const startMs = Date.now();
+
 	const discoveredBooks = await discoverBooks();
 
-	// Stage 3: Fetch and extract raw book records.
+	// Stage 5: Add one deliberately invalid URL for testing.
+	const TEST_FAILURE = process.argv.includes('--test-failure');
+
+	if (TEST_FAILURE) {
+		discoveredBooks.push({
+			product_url:
+				'https://books.toscrape.com/catalogue/this-book-does-not-exist-999999.html',
+			source_page: START_URL,
+		});
+	}
+
 	const rawBooks = [];
+	let detailPages = 0;
 
 	for (let i = 0; i < discoveredBooks.length; i++) {
 		const book = discoveredBooks[i];
 
-		const html = await fetchPage(book.product_url, `book-${i + 1}.html`);
+		try {
+			const html = await fetchPage(book.product_url, `book-${i + 1}.html`);
 
-		const record = extractBook(html, book.product_url, book.source_page);
+			detailPages++;
 
-		rawBooks.push(record);
+			const record = extractBook(html, book.product_url, book.source_page);
+
+			rawBooks.push(record);
+		} catch (error) {
+			console.error(`FAILED: ${book.product_url} - ${error.message}`);
+
+			stats.failed_pages.push({
+				url: book.product_url,
+				reason: error.message,
+			});
+		}
 	}
 
-	console.log('\nFirst raw record:');
-	console.log(JSON.stringify(rawBooks[0], null, 2));
+	console.log(`\ndetail_pages=${detailPages}`);
 
-	console.log(`\ndetail_pages=${rawBooks.length}`);
+	// Stage 4: Validate and save successful records.
+	const result = await saveBooks(rawBooks);
 
-	// Stage 4: Normalize, validate, and save JSON.
-	await saveBooks(rawBooks);
+	// Stage 5: Generate run report.
+	const report = {
+		started_at: startTime.toISOString(),
+		duration_ms: Date.now() - startMs,
+		pages_fetched: stats.pages_fetched,
+		cache_hits: stats.cache_hits,
+		valid_records: result.valid_records,
+		invalid_records: result.invalid_records,
+		failed_pages: stats.failed_pages,
+	};
+
+	await fs.writeFile(
+		path.join(OUTPUT_DIR, 'run-report.json'),
+		JSON.stringify(report, null, 2),
+		'utf8',
+	);
+
+	console.log('\nRun report:');
+	console.log(JSON.stringify(report, null, 2));
 }
 
 main().catch((error) => {
