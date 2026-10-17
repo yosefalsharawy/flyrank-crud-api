@@ -1,21 +1,91 @@
-# FlyRank A9 — The Polite Scraper
+## Overview
 
-## Target Classification
+A Node.js web scraper that collects book information from the first three catalogue pages of Books to Scrape.
 
-**Target website:** https://books.toscrape.com/
+The scraper discovers book URLs, downloads and caches HTML, extracts book details using Cheerio, validates records using Zod, and exports structured JSON files.
 
-**Why this target:** Books to Scrape is a public practice sandbox designed for learning web scraping.
+## Requirements
 
-**Scope:** Only the first three catalogue pages, containing 60 books.
+- Node.js 20+
+- npm
 
-**Data collected:** Book title, product URL, price, availability, rating, description, source page, and fetch timestamp.
+## Installation
 
-**Robots.txt check:**
+From the `scraper` directory:
 
-- URL: https://books.toscrape.com/robots.txt
-- HTTP status: 404 Not Found
-- Result: No robots file found.
+```bash
+npm ci
+```
 
-**Why scraping is appropriate:** The website is explicitly provided as a practice environment for web scraping. A missing robots.txt file is not itself permission to scrape.
+## Run
 
-I will not reuse this code on another site without checking its rules and terms first.
+```bash
+npm start
+```
+
+To test failure handling:
+
+```bash
+node src/index.js --test-failure
+```
+
+## Output Files
+
+| File                     | Description                            |
+| ------------------------ | -------------------------------------- |
+| `output/books.json`      | Validated book records                 |
+| `output/errors.json`     | Invalid records and validation reasons |
+| `output/run-report.json` | Execution statistics and failed pages  |
+
+## Book Record Schema
+
+| Field               | Type                           |
+| ------------------- | ------------------------------ |
+| `title`             | String                         |
+| `product_url`       | HTTPS URL                      |
+| `price_text`        | String                         |
+| `price_gbp`         | Number                         |
+| `availability_text` | String                         |
+| `rating_text`       | One, Two, Three, Four, or Five |
+| `description`       | String or null                 |
+| `source_page`       | HTTPS URL                      |
+| `fetched_at`        | ISO datetime string            |
+
+## Politeness
+
+- Uses an identifying User-Agent.
+- Waits at least 500 milliseconds between real HTTP requests.
+- Uses a 30-second request timeout.
+- Retries once on timeouts and HTTP 5xx errors.
+- Does not retry HTTP 403 or 404 responses.
+- Caches downloaded HTML to avoid repeated requests.
+
+## Limitations
+
+- Scrapes only the first three catalogue pages.
+- Extracts data from static HTML.
+- Depends on the website's current HTML structure and CSS selectors.
+- Does not handle JavaScript-rendered pages.
+- Does not require a browser because Books to Scrape serves the required content in its HTML responses.
+
+## Ethical Considerations
+
+- Prefer official APIs when available.
+- Check the target website's rules and terms before scraping.
+- Do not bypass logins, paywalls, or access restrictions.
+- Do not attempt to circumvent blocks.
+- Collect only the data needed for the assignment.
+
+## Run Evidence
+
+After a successful normal run, record the actual values from `output/run-report.json` here.
+
+Expected successful result:
+
+- Catalogue pages: 3
+- Unique book URLs: 60
+- Valid records: 60
+- Invalid records: 0
+- Failed pages: 0
+
+The exact cache-hit count, network-fetch count, and duration depend on the run.
