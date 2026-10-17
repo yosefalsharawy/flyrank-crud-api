@@ -1,9 +1,11 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const cheerio = require('cheerio');
+const { z } = require('zod');
 
 const START_URL = 'https://books.toscrape.com/';
 const CACHE_DIR = path.join(__dirname, '../cache');
+const OUTPUT_DIR = path.join(__dirname, '../output');
 
 const USER_AGENT =
 	'FlyRankInternship-A9/1.0 (+https://github.com/yosefalsharawy/flyrank-crud-api)';
@@ -12,7 +14,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let lastRequestTime = 0;
 
-// Reusable fetch function for catalogue and detail pages.
+// =====================================
+// STAGE 1: FETCH AND CACHE HTML
+// =====================================
+
 async function fetchPage(url, cacheFile) {
 	const cachePath = path.join(CACHE_DIR, cacheFile);
 
@@ -21,10 +26,12 @@ async function fetchPage(url, cacheFile) {
 		console.log(`CACHE HIT: ${cacheFile}`);
 		return html;
 	} catch (error) {
-		if (error.code !== 'ENOENT') throw error;
+		if (error.code !== 'ENOENT') {
+			throw error;
+		}
 	}
 
-	// Respect the minimum delay between network requests.
+	// Wait at least 500ms between actual HTTP requests.
 	if (lastRequestTime) {
 		const elapsed = Date.now() - lastRequestTime;
 		await sleep(Math.max(0, 500 - elapsed));
@@ -35,7 +42,9 @@ async function fetchPage(url, cacheFile) {
 	console.log(`FETCH: ${cacheFile}`);
 
 	const response = await fetch(url, {
-		headers: { 'User-Agent': USER_AGENT },
+		headers: {
+			'User-Agent': USER_AGENT,
+		},
 		signal: AbortSignal.timeout(30000),
 	});
 
@@ -46,12 +55,16 @@ async function fetchPage(url, cacheFile) {
 	const html = await response.text();
 
 	await fs.mkdir(CACHE_DIR, { recursive: true });
+
 	await fs.writeFile(cachePath, html, 'utf8');
 
 	return html;
 }
 
-// Stage 2: Discover books from three catalogue pages.
+// =====================================
+// STAGE 2: DISCOVER BOOK URLS
+// =====================================
+
 async function discoverBooks() {
 	let pageUrl = START_URL;
 	const books = [];
@@ -76,14 +89,14 @@ async function discoverBooks() {
 			const nextHref = $('li.next a').attr('href');
 
 			if (!nextHref) {
-				throw new Error(`Next link missing on page ${pageNumber}`);
+				throw new Error(`Next link missing on catalogue page ${pageNumber}`);
 			}
 
 			pageUrl = new URL(nextHref, pageUrl).href;
 		}
 	}
 
-	// Deduplicate by product URL.
+	// Deduplicate books using their absolute product URLs.
 	const uniqueBooks = [
 		...new Map(books.map((book) => [book.product_url, book])).values(),
 	];
@@ -95,7 +108,10 @@ async function discoverBooks() {
 	return uniqueBooks;
 }
 
-// Stage 3: Extract one book's raw details.
+// =====================================
+// STAGE 3: EXTRACT RAW BOOK DETAILS
+// =====================================
+
 function extractBook(html, productUrl, sourcePage) {
 	const $ = cheerio.load(html);
 
@@ -133,8 +149,119 @@ function extractBook(html, productUrl, sourcePage) {
 	};
 }
 
+// =====================================
+// STAGE 4: NORMALIZE AND VALIDATE
+// =====================================
+
+const bookSchema = z.object({
+	title: z.string().trim().min(1),
+
+	product_url: z.url().startsWith('https://'),
+
+	price_text: z.string().trim().min(1),
+
+	price_gbp: z.number().finite().nonnegative(),
+
+	availability_text: z.string().trim().min(1),
+
+	rating_text: z.enum(['One', 'Two', 'Three', 'Four', 'Five']),
+
+	description: z.string().nullable(),
+
+	source_page: z.url().startsWith('https://'),
+
+	fetched_at: z.iso.datetime(),
+});
+
+function normalizeBook(rawBook) {
+	const priceText = rawBook.price_text.trim();
+
+	// Convert "£51.77" into the number 51.77.
+	const priceMatch = /^£(\d+(?:\.\d{1,2})?)$/.exec(priceText);
+
+	return {
+		...rawBook,
+		product_url: new URL(rawBook.product_url).href,
+		price_text: priceText,
+		price_gbp: priceMatch ? Number(priceMatch[1]) : NaN,
+	};
+}
+
+async function saveBooks(rawBooks) {
+	const validBooks = [];
+	const errors = [];
+	const seenUrls = new Set();
+
+	for (const rawBook of rawBooks) {
+		let normalizedBook;
+
+		// Normalize each raw record.
+		try {
+			normalizedBook = normalizeBook(rawBook);
+		} catch (error) {
+			errors.push({
+				product_url: rawBook.product_url,
+				reason: error.message,
+			});
+
+			continue;
+		}
+
+		// Validate the normalized record using Zod.
+		const result = bookSchema.safeParse(normalizedBook);
+
+		if (!result.success) {
+			errors.push({
+				product_url: rawBook.product_url,
+				reason: result.error.issues.map(
+					(issue) => `${issue.path.join('.')}: ${issue.message}`,
+				),
+			});
+
+			continue;
+		}
+
+		const book = result.data;
+
+		// Skip duplicate book URLs.
+		if (seenUrls.has(book.product_url)) {
+			continue;
+		}
+
+		seenUrls.add(book.product_url);
+		validBooks.push(book);
+	}
+
+	// Create the output directory if it doesn't exist.
+	await fs.mkdir(OUTPUT_DIR, { recursive: true });
+
+	// Save valid records.
+	await fs.writeFile(
+		path.join(OUTPUT_DIR, 'books.json'),
+		JSON.stringify(validBooks, null, 2),
+		'utf8',
+	);
+
+	// Save invalid records with their reasons.
+	await fs.writeFile(
+		path.join(OUTPUT_DIR, 'errors.json'),
+		JSON.stringify(errors, null, 2),
+		'utf8',
+	);
+
+	console.log(`valid_records=${validBooks.length}`);
+	console.log(`invalid_records=${errors.length}`);
+}
+
+// =====================================
+// MAIN
+// =====================================
+
 async function main() {
+	// Stage 2: Discover books.
 	const discoveredBooks = await discoverBooks();
+
+	// Stage 3: Fetch and extract raw book records.
 	const rawBooks = [];
 
 	for (let i = 0; i < discoveredBooks.length; i++) {
@@ -151,6 +278,9 @@ async function main() {
 	console.log(JSON.stringify(rawBooks[0], null, 2));
 
 	console.log(`\ndetail_pages=${rawBooks.length}`);
+
+	// Stage 4: Normalize, validate, and save JSON.
+	await saveBooks(rawBooks);
 }
 
 main().catch((error) => {
