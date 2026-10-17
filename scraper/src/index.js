@@ -12,19 +12,19 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let lastRequestTime = 0;
 
-async function fetchPage(url, pageNumber) {
-	const cachePath = path.join(CACHE_DIR, `catalogue-page-${pageNumber}.html`);
+// Reusable fetch function for catalogue and detail pages.
+async function fetchPage(url, cacheFile) {
+	const cachePath = path.join(CACHE_DIR, cacheFile);
 
-	// First, try reading the local cache.
 	try {
 		const html = await fs.readFile(cachePath, 'utf8');
-		console.log(`CACHE HIT: page ${pageNumber}`);
+		console.log(`CACHE HIT: ${cacheFile}`);
 		return html;
 	} catch (error) {
 		if (error.code !== 'ENOENT') throw error;
 	}
 
-	// Wait at least 500 ms between actual requests.
+	// Respect the minimum delay between network requests.
 	if (lastRequestTime) {
 		const elapsed = Date.now() - lastRequestTime;
 		await sleep(Math.max(0, 500 - elapsed));
@@ -32,11 +32,11 @@ async function fetchPage(url, pageNumber) {
 
 	lastRequestTime = Date.now();
 
-	console.log(`FETCH: page ${pageNumber}`);
+	console.log(`FETCH: ${cacheFile}`);
 
 	const response = await fetch(url, {
 		headers: { 'User-Agent': USER_AGENT },
-		signal: AbortSignal.timeout(10000),
+		signal: AbortSignal.timeout(30000),
 	});
 
 	if (response.status !== 200) {
@@ -51,46 +51,109 @@ async function fetchPage(url, pageNumber) {
 	return html;
 }
 
+// Stage 2: Discover books from three catalogue pages.
 async function discoverBooks() {
 	let pageUrl = START_URL;
-	let cataloguePages = 0;
-	const discoveredUrls = [];
+	const books = [];
 
-	while (pageUrl && cataloguePages < 3) {
-		const pageNumber = cataloguePages + 1;
-		const html = await fetchPage(pageUrl, pageNumber);
+	for (let pageNumber = 1; pageNumber <= 3; pageNumber++) {
+		const html = await fetchPage(pageUrl, `catalogue-page-${pageNumber}.html`);
+
 		const $ = cheerio.load(html);
 
-		// Find all book detail links on the current page.
 		$('article.product_pod h3 a').each((_, element) => {
 			const href = $(element).attr('href');
 
 			if (href) {
-				const absoluteUrl = new URL(href, pageUrl).href;
-				discoveredUrls.push(absoluteUrl);
+				books.push({
+					product_url: new URL(href, pageUrl).href,
+					source_page: pageUrl,
+				});
 			}
 		});
 
-		cataloguePages++;
+		if (pageNumber < 3) {
+			const nextHref = $('li.next a').attr('href');
 
-		// Follow the catalogue's Next link.
-		const nextHref = $('li.next a').attr('href');
+			if (!nextHref) {
+				throw new Error(`Next link missing on page ${pageNumber}`);
+			}
 
-		pageUrl =
-			nextHref && cataloguePages < 3 ? new URL(nextHref, pageUrl).href : null;
+			pageUrl = new URL(nextHref, pageUrl).href;
+		}
 	}
 
-	// Remove duplicate URLs.
-	const uniqueUrls = [...new Set(discoveredUrls)];
+	// Deduplicate by product URL.
+	const uniqueBooks = [
+		...new Map(books.map((book) => [book.product_url, book])).values(),
+	];
 
-	console.log(`catalogue_pages=${cataloguePages}`);
-	console.log(`discovered=${discoveredUrls.length}`);
-	console.log(`unique_urls=${uniqueUrls.length}`);
+	console.log(
+		`catalogue_pages=3 discovered=${books.length} unique_urls=${uniqueBooks.length}`,
+	);
 
-	return uniqueUrls;
+	return uniqueBooks;
 }
 
-discoverBooks().catch((error) => {
+// Stage 3: Extract one book's raw details.
+function extractBook(html, productUrl, sourcePage) {
+	const $ = cheerio.load(html);
+
+	const title = $('.product_main h1').first().text().trim();
+
+	const priceText = $('.product_main .price_color').first().text().trim();
+
+	const availabilityText = $('.product_main .availability')
+		.first()
+		.text()
+		.replace(/\s+/g, ' ')
+		.trim();
+
+	const ratingClass = $('.product_main .star-rating').attr('class') || '';
+
+	const ratingText =
+		ratingClass
+			.split(/\s+/)
+			.find((value) =>
+				['One', 'Two', 'Three', 'Four', 'Five'].includes(value),
+			) || null;
+
+	const description =
+		$('#product_description').next('p').first().text().trim() || null;
+
+	return {
+		title,
+		product_url: productUrl,
+		price_text: priceText,
+		availability_text: availabilityText,
+		rating_text: ratingText,
+		description,
+		source_page: sourcePage,
+		fetched_at: new Date().toISOString(),
+	};
+}
+
+async function main() {
+	const discoveredBooks = await discoverBooks();
+	const rawBooks = [];
+
+	for (let i = 0; i < discoveredBooks.length; i++) {
+		const book = discoveredBooks[i];
+
+		const html = await fetchPage(book.product_url, `book-${i + 1}.html`);
+
+		const record = extractBook(html, book.product_url, book.source_page);
+
+		rawBooks.push(record);
+	}
+
+	console.log('\nFirst raw record:');
+	console.log(JSON.stringify(rawBooks[0], null, 2));
+
+	console.log(`\ndetail_pages=${rawBooks.length}`);
+}
+
+main().catch((error) => {
 	console.error('Scraper failed:', error.message);
 	process.exitCode = 1;
 });
